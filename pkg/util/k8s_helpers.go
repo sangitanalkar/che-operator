@@ -9,21 +9,14 @@
 // Contributors:
 //   Red Hat, Inc. - initial API and implementation
 //
-package che
+package util
 
 import (
 	"bytes"
-	"context"
-	"crypto/tls"
-	"encoding/pem"
+	"fmt"
 	"io"
-	"net/http"
-	"time"
 
-	orgv1 "github.com/eclipse/che-operator/pkg/apis/org/v1"
-	"github.com/eclipse/che-operator/pkg/deploy"
-	"github.com/eclipse/che-operator/pkg/util"
-	routev1 "github.com/openshift/api/route/v1"
+	"github.com/prometheus/common/log"
 	"github.com/sirupsen/logrus"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -31,6 +24,8 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/remotecommand"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
@@ -39,7 +34,7 @@ type k8s struct {
 }
 
 func GetK8Client() *k8s {
-	tests := util.IsTestMode()
+	tests := IsTestMode()
 	if !tests {
 		cfg, err := config.GetConfig()
 		if err != nil {
@@ -283,57 +278,48 @@ func (cl *k8s) GetDeploymentPod(name string, ns string) (podName string, err err
 	return podName, nil
 }
 
-// GetEndpointTlsCrt creates a test TLS route and gets it to extract certificate chain
-// There's an easier way which is to read tls secret in default (3.11) or openshift-ingress (4.0) namespace
-// which however requires extra privileges for operator service account
-func (r *ReconcileChe) GetEndpointTlsCrt(instance *orgv1.CheCluster, url string) (certificate []byte, err error) {
-	testRoute := &routev1.Route{}
-	var requestURL string
-	if len(url) < 1 {
-		testRoute = deploy.NewTlsRoute(instance, "test", "test", 8080)
-		logrus.Infof("Creating a test route %s to extract router crt", testRoute.Name)
-		if err := r.CreateNewRoute(instance, testRoute); err != nil {
-			logrus.Errorf("Failed to create test route %s: %s", testRoute.Name, err)
-			return nil, err
-		}
-		// sometimes timing conditions apply, and host isn't available right away
-		if len(testRoute.Spec.Host) < 1 {
-			time.Sleep(time.Duration(1) * time.Second)
-			testRoute := r.GetEffectiveRoute(instance, "test")
-			requestURL = "https://" + testRoute.Spec.Host
-		}
-		requestURL = "https://" + testRoute.Spec.Host
-
-	} else {
-		requestURL = url
-	}
-	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", requestURL, nil)
-	resp, err := client.Do(req)
+// Reads 'user' and 'password' from the given secret
+func (cl *k8s) ReadSecret(name string, ns string) (user string, password string, err error) {
+	secret, err := cl.clientset.CoreV1().Secrets(ns).Get(name, metav1.GetOptions{})
 	if err != nil {
-		logrus.Errorf("An error occurred when reaching test TLS route: %s", err)
-		if r.tests {
-			fakeCrt := make([]byte, 5)
-			return fakeCrt, nil
-		}
-		return nil, err
+		return "", "", err
+	}
+	return string(secret.Data["user"]), string(secret.Data["password"]), nil
+}
+
+func (cl *k8s) RunExec(command []string, podName, namespace string) (string, string, error) {
+
+	req := cl.clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec")
+
+	req.VersionedParams(&corev1.PodExecOptions{
+		Command: command,
+		Stdin:   false,
+		Stdout:  true,
+		Stderr:  true,
+		TTY:     false,
+	}, scheme.ParameterCodec)
+
+	cfg, _ := config.GetConfig()
+	exec, err := remotecommand.NewSPDYExecutor(cfg, "POST", req.URL())
+	if err != nil {
+		return "", "", fmt.Errorf("error while creating executor: %v", err)
 	}
 
-	for i := range resp.TLS.PeerCertificates {
-		cert := resp.TLS.PeerCertificates[i].Raw
-		crt := pem.EncodeToMemory(&pem.Block{
-			Type:  "CERTIFICATE",
-			Bytes: cert,
-		})
-		certificate = append(certificate, crt...)
+	var stdout, stderr bytes.Buffer
+	var stdin io.Reader
+	err = exec.Stream(remotecommand.StreamOptions{
+		Stdin:  stdin,
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Tty:    false,
+	})
+	if err != nil {
+		return stdout.String(), stderr.String(), err
 	}
 
-	if len(url) < 1 {
-		logrus.Infof("Deleting a test route %s to extract routes crt", testRoute.Name)
-		if err := r.client.Delete(context.TODO(), testRoute); err != nil {
-			logrus.Errorf("Failed to delete test route %s: %s", testRoute.Name, err)
-		}
-	}
-	return certificate, nil
+	return stdout.String(), stderr.String(), nil
 }

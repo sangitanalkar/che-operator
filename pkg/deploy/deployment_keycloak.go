@@ -21,7 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
-func NewKeycloakDeployment(cr *orgv1.CheCluster, keycloakPostgresPassword string, keycloakAdminPassword string, cheFlavor string, cheCertSecretVersion string, openshiftCertSecretVersion string) *appsv1.Deployment {
+func NewKeycloakDeployment(cr *orgv1.CheCluster, cheFlavor string, cheCertSecretVersion string, openshiftCertSecretVersion string) *appsv1.Deployment {
 	optionalEnv := true
 	keycloakName := "keycloak"
 	labels := GetLabels(cr, keycloakName)
@@ -68,19 +68,10 @@ func NewKeycloakDeployment(cr *orgv1.CheCluster, keycloakPostgresPassword string
 		"\"" + jbossDir + "/openshift.jks\", password => \"" + trustpass + "\", disabled => \"false\" },enabled=true) \n" +
 		"stop-embedded-server\" > /scripts/add_openshift_certificate.cli && " +
 		"/opt/jboss/keycloak/bin/jboss-cli.sh --file=/scripts/add_openshift_certificate.cli"
-	keycloakAdminUserName := util.GetValue(cr.Spec.Auth.IdentityProviderAdminUserName, DefaultKeycloakAdminUserName)
 	keycloakEnv := []corev1.EnvVar{
 		{
 			Name:  "PROXY_ADDRESS_FORWARDING",
 			Value: "true",
-		},
-		{
-			Name:  "KEYCLOAK_USER",
-			Value: keycloakAdminUserName,
-		},
-		{
-			Name:  "KEYCLOAK_PASSWORD",
-			Value: keycloakAdminPassword,
 		},
 		{
 			Name:  "DB_VENDOR",
@@ -107,10 +98,6 @@ func NewKeycloakDeployment(cr *orgv1.CheCluster, keycloakPostgresPassword string
 			Value: "keycloak",
 		},
 		{
-			Name:  "POSTGRES_PASSWORD",
-			Value: keycloakPostgresPassword,
-		},
-		{
 			Name: "CHE_SELF__SIGNED__CERT",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
@@ -135,6 +122,62 @@ func NewKeycloakDeployment(cr *orgv1.CheCluster, keycloakPostgresPassword string
 			},
 		},
 	}
+
+	identityProviderPostgresSecret := cr.Spec.Auth.IdentityProviderPostgresSecret
+	if len(identityProviderPostgresSecret) > 0 {
+		keycloakEnv = append(keycloakEnv, corev1.EnvVar{
+			Name: "POSTGRES_PASSWORD",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					Key: "password",
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: identityProviderPostgresSecret,
+					},
+				},
+			},
+		})
+	} else {
+		keycloakEnv = append(keycloakEnv, corev1.EnvVar{
+			Name:  "POSTGRES_PASSWORD",
+			Value: cr.Spec.Auth.IdentityProviderPostgresPassword,
+		})
+	}
+
+	identityProviderSecret := cr.Spec.Auth.IdentityProviderSecret
+	if len(identityProviderSecret) > 0 {
+		keycloakEnv = append(keycloakEnv, corev1.EnvVar{
+			Name: "KEYCLOAK_PASSWORD",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					Key: "password",
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: identityProviderSecret,
+					},
+				},
+			},
+		},
+			corev1.EnvVar{
+				Name: "KEYCLOAK_USER",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						Key: "user",
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: identityProviderSecret,
+						},
+					},
+				},
+			})
+	} else {
+		keycloakEnv = append(keycloakEnv, corev1.EnvVar{
+			Name:  "KEYCLOAK_PASSWORD",
+			Value: cr.Spec.Auth.IdentityProviderPassword,
+		},
+			corev1.EnvVar{
+				Name:  "KEYCLOAK_USER",
+				Value: cr.Spec.Auth.IdentityProviderAdminUserName,
+			})
+	}
+
 	if cheFlavor == "codeready" {
 		keycloakEnv = []corev1.EnvVar{
 			{
@@ -160,18 +203,6 @@ func NewKeycloakDeployment(cr *orgv1.CheCluster, keycloakPostgresPassword string
 			{
 				Name:  "DB_USERNAME",
 				Value: keycloakName,
-			},
-			{
-				Name:  "DB_PASSWORD",
-				Value: keycloakPostgresPassword,
-			},
-			{
-				Name:  "SSO_ADMIN_USERNAME",
-				Value: keycloakAdminUserName,
-			},
-			{
-				Name:  "SSO_ADMIN_PASSWORD",
-				Value: keycloakAdminPassword,
 			},
 			{
 				Name:  "DB_VENDOR",
@@ -214,13 +245,68 @@ func NewKeycloakDeployment(cr *orgv1.CheCluster, keycloakPostgresPassword string
 				},
 			},
 		}
+
+		identityProviderPostgresSecret := cr.Spec.Auth.IdentityProviderPostgresSecret
+		if len(identityProviderPostgresSecret) > 0 {
+			keycloakEnv = append(keycloakEnv, corev1.EnvVar{
+				Name: "DB_PASSWORD",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						Key: "password",
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: identityProviderPostgresSecret,
+						},
+					},
+				},
+			})
+		} else {
+			keycloakEnv = append(keycloakEnv, corev1.EnvVar{
+				Name:  "DB_PASSWORD",
+				Value: cr.Spec.Auth.IdentityProviderPostgresPassword,
+			})
+		}
+
+		identityProviderSecret := cr.Spec.Auth.IdentityProviderSecret
+		if len(identityProviderSecret) > 0 {
+			keycloakEnv = append(keycloakEnv, corev1.EnvVar{
+				Name: "SSO_ADMIN_PASSWORD",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						Key: "password",
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: identityProviderSecret,
+						},
+					},
+				},
+			},
+				corev1.EnvVar{
+					Name: "SSO_ADMIN_USERNAME",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							Key: "user",
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: identityProviderSecret,
+							},
+						},
+					},
+				})
+		} else {
+			keycloakEnv = append(keycloakEnv, corev1.EnvVar{
+				Name:  "SSO_ADMIN_PASSWORD",
+				Value: cr.Spec.Auth.IdentityProviderPassword,
+			},
+				corev1.EnvVar{
+					Name:  "SSO_ADMIN_USERNAME",
+					Value: cr.Spec.Auth.IdentityProviderAdminUserName,
+				})
+		}
 	}
 	command := addCertToTrustStoreCommand + " && " + changeConfigCommand + " && /opt/jboss/docker-entrypoint.sh -b 0.0.0.0 -c standalone.xml"
 	command += " -Dkeycloak.profile.feature.token_exchange=enabled -Dkeycloak.profile.feature.admin_fine_grained_authz=enabled"
 	if cheFlavor == "codeready" {
 		command = addCertToTrustStoreCommand +
-		" && echo \"feature.token_exchange=enabled\nfeature.admin_fine_grained_authz=enabled\" > /opt/eap/standalone/configuration/profile.properties && " +
-		startCommand
+			" && echo \"feature.token_exchange=enabled\nfeature.admin_fine_grained_authz=enabled\" > /opt/eap/standalone/configuration/profile.properties && " +
+			startCommand
 	}
 
 	return &appsv1.Deployment{
