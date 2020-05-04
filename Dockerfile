@@ -21,7 +21,7 @@ USER root
 ADD . /go/src/github.com/eclipse/che-operator
 
 # do no break RUN lines when building with UBI base images. https://projects.engineering.redhat.com/browse/OSBS-7398 & OSBS-7399
-RUN cd /go/src/github.com/eclipse/che-operator && export MOCK_API=true && go test -v ./... && OOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/che-operator/che-operator /go/src/github.com/eclipse/che-operator/cmd/manager/main.go && cd ..
+RUN cd /go/src/github.com/eclipse/che-operator && export MOCK_API=true && go test -v ./... && OOS=linux GOARCH=s390x CGO_ENABLED=0 go build -o /tmp/che-operator/che-operator /go/src/github.com/eclipse/che-operator/cmd/manager/main.go && cd ..
 
 # https://access.redhat.com/containers/?tab=tags#/registry.access.redhat.com/ubi8-minimal
 FROM registry.access.redhat.com/ubi8-minimal:8.1-398
