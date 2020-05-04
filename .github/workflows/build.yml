@@ -22,8 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v1
-    - name: Build image on amd
-      run: docker build .
+    #- name: Build image on amd
+    #  run: docker build .
     - name: Build on s390x
       uses: uraimo/run-on-arch-action@master
       id: runcmd
@@ -31,7 +31,8 @@ jobs:
         architecture: s390x
         distribution: ubuntu18.04
         run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y sudo apt-transport-https  ca-certificates  curl software-properties-common
+          apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y sudo curl
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y apt-transport-https  ca-certificates  curl software-properties-common
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
           sudo add-apt-repository "deb [arch=s390x] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
           sudo apt-get update
