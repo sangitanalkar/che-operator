@@ -24,3 +24,11 @@ jobs:
     - uses: actions/checkout@v1
     - name: Build the Docker image
       run: docker build .
+    - name: Build on s390x
+      uses: uraimo/run-on-arch-action@master
+      id: runcmd
+      with:
+        architecture: s390x
+        distribution: ubuntu18.04
+        run: |
+          docker build .
