@@ -45,3 +45,4 @@ jobs:
           docker version
           sudo free -mh && sudo sync && sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches' && sudo free -mh
           docker build .
+          uname -a
